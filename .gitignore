@@ -1,0 +1,15 @@
+# PyInstaller
+build/
+dist/
+*.spec
+
+# zip
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Test data
+TEST/

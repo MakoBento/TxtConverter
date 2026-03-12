@@ -1,5 +1,5 @@
 """
-ExcelToText - Excel(.xlsx/.xls)ファイルを取り消し線を除外してテキストに変換するツール
+ExcelToText - Excel(.xlsx/.xlsm/.xls)ファイルを取り消し線を除外してテキストに変換するツール
 """
 
 import os
@@ -81,7 +81,8 @@ def convert_file(src_path: str, dst_dir: str, log_func) -> bool:
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
     try:
-        if ext == ".xlsx":
+        if ext in (".xlsx", ".xlsm"):
+            # .xlsm はマクロ有効ブック。openpyxl はマクロを無視して読み込める
             # rich_text=True で CellRichText を取得可能にする
             wb = openpyxl.load_workbook(
                 str(src), read_only=True, data_only=True, rich_text=True
@@ -257,7 +258,7 @@ class App(TkinterDnD.Tk):
         if self.mode_var.get() == "file":
             path = filedialog.askopenfilename(
                 title="Excelファイルを選択",
-                filetypes=[("Excel ファイル", "*.xlsx *.xls")]
+                filetypes=[("Excel ファイル", "*.xlsx *.xlsm *.xls")]
             )
         else:
             path = filedialog.askdirectory(title="フォルダを選択")
@@ -297,8 +298,8 @@ class App(TkinterDnD.Tk):
             if not os.path.isfile(src):
                 messagebox.showwarning("入力エラー", "指定されたファイルが見つかりません。")
                 return
-            if not src.lower().endswith((".xlsx", ".xls")):
-                messagebox.showwarning("入力エラー", "対応していないファイル形式です。\n.xlsx または .xls ファイルを指定してください。")
+            if not src.lower().endswith((".xlsx", ".xlsm", ".xls")):
+                messagebox.showwarning("入力エラー", "対応していないファイル形式です。\n.xlsx、.xlsm または .xls ファイルを指定してください。")
                 return
             files = [src]
         else:
@@ -307,7 +308,7 @@ class App(TkinterDnD.Tk):
                 return
             files = [
                 os.path.join(src, f) for f in os.listdir(src)
-                if f.lower().endswith((".xlsx", ".xls"))
+                if f.lower().endswith((".xlsx", ".xlsm", ".xls"))
             ]
             if not files:
                 messagebox.showwarning("入力エラー", "フォルダ内にExcelファイルが見つかりません。")

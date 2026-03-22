@@ -211,21 +211,19 @@ class App(TkinterDnD.Tk):
     def _build_ui(self):
         pad = {"padx": 8, "pady": 4}
 
-        # --- モード選択 ---
-        mode_frame = tk.LabelFrame(self, text="変換モード")
-        mode_frame.pack(fill="x", **pad)
+        # --- 使い方説明 ---
+        help_text = (
+            "ファイルまたはフォルダを指定して.txtファイルに変換します（サブフォルダも対象）\n"
+            "excel系のファイルは取消線ありのテキストを<deleted>タグで囲います\n"
+            "対応: .xlsx/.xlsm/.xls/.cs/.md/.txt/.sql/.py/.js/.html/.htm/.ts/.tsx/.css/.vue/.json/.xml\n"
+            "出力: 指定フォルダに「元ファイル名_yyyymmddhhmmss.txt」で保存（例: main.py_20260322120000.txt）"
+        )
+        tk.Label(
+            self, text=help_text, justify="left",
+            anchor="w", relief="groove", padx=8, pady=6
+        ).pack(fill="x", padx=8, pady=(8, 2))
 
-        self.mode_var = tk.StringVar(value="file")
-        tk.Radiobutton(
-            mode_frame, text="単一ファイルモード", variable=self.mode_var,
-            value="file", command=self._on_mode_change
-        ).pack(side="left", padx=12, pady=4)
-        tk.Radiobutton(
-            mode_frame, text="フォルダ一括モード", variable=self.mode_var,
-            value="folder", command=self._on_mode_change
-        ).pack(side="left", padx=12, pady=4)
-
-        # --- 入力パス ---
+        # --- 入力パス（ファイル・フォルダ自動判定） ---
         src_frame = tk.LabelFrame(self, text="対象ファイル / フォルダ")
         src_frame.pack(fill="x", **pad)
 
@@ -234,8 +232,16 @@ class App(TkinterDnD.Tk):
         self.src_entry.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=4)
         self.src_entry.drop_target_register(DND_FILES)
         self.src_entry.dnd_bind("<<Drop>>", self._on_drop)
-        self.src_btn = tk.Button(src_frame, text="参照...", command=self._browse_src)
-        self.src_btn.pack(side="right", padx=8, pady=4)
+        # フォルダ参照ボタン
+        self.src_btn_folder = tk.Button(
+            src_frame, text="フォルダ参照", command=self._browse_src_folder
+        )
+        self.src_btn_folder.pack(side="right", padx=(0, 4), pady=4)
+        # ファイル参照ボタン
+        self.src_btn_file = tk.Button(
+            src_frame, text="ファイル参照", command=self._browse_src_file
+        )
+        self.src_btn_file.pack(side="right", padx=(8, 0), pady=4)
 
         # --- 出力先 ---
         dst_frame = tk.LabelFrame(self, text="出力先フォルダ")
@@ -265,9 +271,6 @@ class App(TkinterDnD.Tk):
         self.log_area.pack(fill="both", expand=True, padx=4, pady=4)
 
     # ----- イベントハンドラ -----
-    def _on_mode_change(self):
-        self.src_var.set("")
-
     @staticmethod
     def _parse_drop_paths(raw: str) -> list[str]:
         """ドロップイベントのデータからパスのリストを解析する。"""
@@ -306,23 +309,26 @@ class App(TkinterDnD.Tk):
         else:
             messagebox.showwarning("入力エラー", "フォルダのみドロップできます。")
 
-    def _browse_src(self):
-        if self.mode_var.get() == "file":
-            # 全対応拡張子のファイルダイアログフィルター
-            all_exts = " ".join(f"*{e}" for e in ALL_EXTENSIONS)
-            excel_exts = " ".join(f"*{e}" for e in EXCEL_EXTENSIONS)
-            text_exts = " ".join(f"*{e}" for e in TEXT_EXTENSIONS)
-            path = filedialog.askopenfilename(
-                title="ファイルを選択",
-                filetypes=[
-                    ("全対応ファイル", all_exts),
-                    ("Excel ファイル", excel_exts),
-                    ("テキスト系ファイル", text_exts),
-                    ("すべてのファイル", "*.*"),
-                ]
-            )
-        else:
-            path = filedialog.askdirectory(title="フォルダを選択")
+    def _browse_src_file(self):
+        """ファイル選択ダイアログを開く。"""
+        all_exts = " ".join(f"*{e}" for e in ALL_EXTENSIONS)
+        excel_exts = " ".join(f"*{e}" for e in EXCEL_EXTENSIONS)
+        text_exts = " ".join(f"*{e}" for e in TEXT_EXTENSIONS)
+        path = filedialog.askopenfilename(
+            title="ファイルを選択",
+            filetypes=[
+                ("全対応ファイル", all_exts),
+                ("Excel ファイル", excel_exts),
+                ("テキスト系ファイル", text_exts),
+                ("すべてのファイル", "*.*"),
+            ]
+        )
+        if path:
+            self.src_var.set(path)
+
+    def _browse_src_folder(self):
+        """フォルダ選択ダイアログを開く。"""
+        path = filedialog.askdirectory(title="フォルダを選択")
         if path:
             self.src_var.set(path)
 
@@ -354,11 +360,9 @@ class App(TkinterDnD.Tk):
             messagebox.showwarning("入力エラー", "出力先フォルダが存在しません。")
             return
 
-        # ファイルリスト作成
-        if self.mode_var.get() == "file":
-            if not os.path.isfile(src):
-                messagebox.showwarning("入力エラー", "指定されたファイルが見つかりません。")
-                return
+        # パスの種類を自動判定してファイルリストを作成
+        if os.path.isfile(src):
+            # 単一ファイル
             ext = Path(src).suffix.lower()
             if ext not in ALL_EXTENSIONS:
                 exts_str = "、".join(ALL_EXTENSIONS)
@@ -368,18 +372,20 @@ class App(TkinterDnD.Tk):
                 )
                 return
             files = [src]
-        else:
-            if not os.path.isdir(src):
-                messagebox.showwarning("入力エラー", "指定されたフォルダが見つかりません。")
-                return
+        elif os.path.isdir(src):
+            # フォルダ一括
             files = collect_target_files(src)
             if not files:
                 messagebox.showwarning("入力エラー", "フォルダ内に対応ファイルが見つかりません。")
                 return
+        else:
+            messagebox.showwarning("入力エラー", "指定されたファイル/フォルダが見つかりません。")
+            return
 
         # UIロックしてバックグラウンド実行
         self.run_btn.configure(state="disabled")
-        self.src_btn.configure(state="disabled")
+        self.src_btn_file.configure(state="disabled")
+        self.src_btn_folder.configure(state="disabled")
         self._log(f"--- 変換開始 ({len(files)} ファイル) ---")
 
         thread = threading.Thread(target=self._run_convert, args=(files, dst), daemon=True)
@@ -397,7 +403,8 @@ class App(TkinterDnD.Tk):
 
         self._log(f"--- 変換完了: 成功={ok}, 失敗/スキップ={ng} ---\n")
         self.after(0, lambda: self.run_btn.configure(state="normal"))
-        self.after(0, lambda: self.src_btn.configure(state="normal"))
+        self.after(0, lambda: self.src_btn_file.configure(state="normal"))
+        self.after(0, lambda: self.src_btn_folder.configure(state="normal"))
 
 
 # ---------------------------------------------------------------------------

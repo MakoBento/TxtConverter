@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo  ExcelToText Build Script
+echo  TxtConverter Build Script
 echo ========================================
 echo.
 
@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 echo.
 echo [2/2] Building exe...
-python -m PyInstaller --onefile --windowed --name ExcelToText excel_to_text.py
+python -m PyInstaller --onefile --windowed --name TxtConverter txt_converter.py
 if errorlevel 1 (
     echo ERROR: Failed to build exe.
     pause
@@ -25,6 +25,6 @@ if errorlevel 1 (
 echo.
 echo ========================================
 echo  Build complete!
-echo  Output: dist\ExcelToText.exe
+echo  Output: dist\TxtConverter.exe
 echo ========================================
 pause

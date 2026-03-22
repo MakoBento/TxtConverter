@@ -1,5 +1,5 @@
 """
-ExcelToText - Excel(.xlsx/.xlsm/.xls)ファイルを取り消し線を除外してテキストに変換するツール
+TxtConverter - 各種テキストファイル・Excel(.xlsx/.xlsm/.xls)をテキストに変換するツール
 """
 
 import os
@@ -16,7 +16,24 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 
 
 # ---------------------------------------------------------------------------
-# 変換ロジック
+# 対応拡張子の定義
+# ---------------------------------------------------------------------------
+
+# Excel系: 複雑な変換（取り消し線判定など）を行う
+EXCEL_EXTENSIONS = (".xlsx", ".xlsm", ".xls")
+
+# テキスト系: 内容をそのままtxtとして出力する
+TEXT_EXTENSIONS = (
+    ".cs", ".md", ".txt", ".sql", ".py", ".js",
+    ".html", ".htm", ".ts", ".tsx", ".css", ".vue", ".json", ".xml"
+)
+
+# 全対応拡張子
+ALL_EXTENSIONS = EXCEL_EXTENSIONS + TEXT_EXTENSIONS
+
+
+# ---------------------------------------------------------------------------
+# Excel変換ロジック
 # ---------------------------------------------------------------------------
 
 def _extract_cell_text(cell) -> str:
@@ -74,43 +91,6 @@ def convert_workbook(wb, sheet_names=None) -> str:
     return "\n".join(lines)
 
 
-def convert_file(src_path: str, dst_dir: str, log_func) -> bool:
-    """1ファイルを変換して出力先に保存する。成功時 True。"""
-    src = Path(src_path)
-    ext = src.suffix.lower()
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-
-    try:
-        if ext in (".xlsx", ".xlsm"):
-            # .xlsm はマクロ有効ブック。openpyxl はマクロを無視して読み込める
-            # rich_text=True で CellRichText を取得可能にする
-            wb = openpyxl.load_workbook(
-                str(src), read_only=True, data_only=True, rich_text=True
-            )
-        elif ext == ".xls":
-            # .xls は openpyxl 非対応。xlrd で読み取り後テキスト化する
-            text = _convert_xls(str(src))
-            out_path = Path(dst_dir) / f"{src.stem}_{timestamp}.txt"
-            out_path.write_text(text, encoding="utf-8")
-            log_func(f"[完了] {src.name} -> {out_path.name}")
-            return True
-        else:
-            log_func(f"[スキップ] {src.name}: 非対応の拡張子")
-            return False
-
-        text = convert_workbook(wb)
-        wb.close()
-
-        out_path = Path(dst_dir) / f"{src.stem}_{timestamp}.txt"
-        out_path.write_text(text, encoding="utf-8")
-        log_func(f"[完了] {src.name} -> {out_path.name}")
-        return True
-
-    except Exception as e:
-        log_func(f"[エラー] {src.name}: {e}")
-        return False
-
-
 def _convert_xls(src_path: str) -> str:
     """
     .xls ファイルを変換する。
@@ -144,13 +124,85 @@ def _convert_xls(src_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# テキスト系変換ロジック
+# ---------------------------------------------------------------------------
+
+def _read_text_file(src_path: str) -> str:
+    """
+    テキストファイルを読み込む。
+    UTF-8 → CP932(Shift-JIS) → UTF-8(errors=replace) の順でフォールバックする。
+    """
+    encodings = ["utf-8", "cp932"]
+    for enc in encodings:
+        try:
+            return Path(src_path).read_text(encoding=enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # 最終フォールバック: 読めない文字を置換
+    return Path(src_path).read_text(encoding="utf-8", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# 共通変換エントリポイント
+# ---------------------------------------------------------------------------
+
+def convert_file(src_path: str, dst_dir: str, log_func) -> bool:
+    """1ファイルを変換して出力先に保存する。成功時 True。"""
+    src = Path(src_path)
+    ext = src.suffix.lower()
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+
+    try:
+        if ext in (".xlsx", ".xlsm"):
+            # .xlsm はマクロ有効ブック。openpyxl はマクロを無視して読み込める
+            # rich_text=True で CellRichText を取得可能にする
+            wb = openpyxl.load_workbook(
+                str(src), read_only=True, data_only=True, rich_text=True
+            )
+            text = convert_workbook(wb)
+            wb.close()
+
+        elif ext == ".xls":
+            # .xls は openpyxl 非対応。xlrd で読み取り後テキスト化する
+            text = _convert_xls(str(src))
+
+        elif ext in TEXT_EXTENSIONS:
+            # テキスト系: 内容をそのままtxtとして出力する
+            text = _read_text_file(str(src))
+
+        else:
+            log_func(f"[スキップ] {src.name}: 非対応の拡張子")
+            return False
+
+        # 出力ファイル名: 元のファイル名（拡張子含む）_タイムスタンプ.txt
+        out_path = Path(dst_dir) / f"{src.name}_{timestamp}.txt"
+        out_path.write_text(text, encoding="utf-8")
+        log_func(f"[完了] {src.name} -> {out_path.name}")
+        return True
+
+    except Exception as e:
+        log_func(f"[エラー] {src.name}: {e}")
+        return False
+
+
+def collect_target_files(folder: str) -> list[str]:
+    """フォルダ内（サブフォルダ含む）の全対応拡張子ファイルを再帰的に収集して返す。"""
+    result = []
+    for root, _dirs, files in os.walk(folder):
+        for f in files:
+            if Path(f).suffix.lower() in ALL_EXTENSIONS:
+                result.append(os.path.join(root, f))
+    return result
+
+
+# ---------------------------------------------------------------------------
 # GUI
 # ---------------------------------------------------------------------------
 
 class App(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
-        self.title("ExcelToText")
+        self.title("TxtConverter")
         self.geometry("720x520")
         self.resizable(True, True)
         self._build_ui()
@@ -256,9 +308,18 @@ class App(TkinterDnD.Tk):
 
     def _browse_src(self):
         if self.mode_var.get() == "file":
+            # 全対応拡張子のファイルダイアログフィルター
+            all_exts = " ".join(f"*{e}" for e in ALL_EXTENSIONS)
+            excel_exts = " ".join(f"*{e}" for e in EXCEL_EXTENSIONS)
+            text_exts = " ".join(f"*{e}" for e in TEXT_EXTENSIONS)
             path = filedialog.askopenfilename(
-                title="Excelファイルを選択",
-                filetypes=[("Excel ファイル", "*.xlsx *.xlsm *.xls")]
+                title="ファイルを選択",
+                filetypes=[
+                    ("全対応ファイル", all_exts),
+                    ("Excel ファイル", excel_exts),
+                    ("テキスト系ファイル", text_exts),
+                    ("すべてのファイル", "*.*"),
+                ]
             )
         else:
             path = filedialog.askdirectory(title="フォルダを選択")
@@ -298,20 +359,22 @@ class App(TkinterDnD.Tk):
             if not os.path.isfile(src):
                 messagebox.showwarning("入力エラー", "指定されたファイルが見つかりません。")
                 return
-            if not src.lower().endswith((".xlsx", ".xlsm", ".xls")):
-                messagebox.showwarning("入力エラー", "対応していないファイル形式です。\n.xlsx、.xlsm または .xls ファイルを指定してください。")
+            ext = Path(src).suffix.lower()
+            if ext not in ALL_EXTENSIONS:
+                exts_str = "、".join(ALL_EXTENSIONS)
+                messagebox.showwarning(
+                    "入力エラー",
+                    f"対応していないファイル形式です。\n対応拡張子: {exts_str}"
+                )
                 return
             files = [src]
         else:
             if not os.path.isdir(src):
                 messagebox.showwarning("入力エラー", "指定されたフォルダが見つかりません。")
                 return
-            files = [
-                os.path.join(src, f) for f in os.listdir(src)
-                if f.lower().endswith((".xlsx", ".xlsm", ".xls"))
-            ]
+            files = collect_target_files(src)
             if not files:
-                messagebox.showwarning("入力エラー", "フォルダ内にExcelファイルが見つかりません。")
+                messagebox.showwarning("入力エラー", "フォルダ内に対応ファイルが見つかりません。")
                 return
 
         # UIロックしてバックグラウンド実行

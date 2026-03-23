@@ -2,6 +2,7 @@
 TxtConverter - 各種テキストファイル・Excel(.xlsx/.xlsm/.xls)をテキストに変換するツール
 """
 
+import configparser
 import os
 import sys
 import threading
@@ -30,6 +31,64 @@ TEXT_EXTENSIONS = (
 
 # 全対応拡張子
 ALL_EXTENSIONS = EXCEL_EXTENSIONS + TEXT_EXTENSIONS
+
+
+# ---------------------------------------------------------------------------
+# confファイル管理
+# ---------------------------------------------------------------------------
+
+def _get_config_path() -> Path:
+    """confファイルのパスを返す。EXEビルド時はEXEと同ディレクトリ、開発時はスクリプトと同ディレクトリ。"""
+    if getattr(sys, "frozen", False):
+        # PyInstallerでビルドされた場合
+        base_dir = Path(sys.executable).parent
+    else:
+        base_dir = Path(__file__).parent
+    return base_dir / "config.ini"
+
+
+def load_config() -> dict:
+    """confファイルから設定を読み込む。ファイルが存在しない場合はデフォルト値を返す。"""
+    config = configparser.ConfigParser()
+    config_path = _get_config_path()
+
+    # デフォルト出力先: スクリプト/EXEと同ディレクトリの output フォルダ
+    if getattr(sys, "frozen", False):
+        default_output = str(Path(sys.executable).parent / "output")
+    else:
+        default_output = str(Path(__file__).parent / "output")
+
+    if config_path.exists():
+        config.read(str(config_path), encoding="utf-8")
+
+    return {
+        "output_dir": config.get("Settings", "output_dir", fallback=default_output)
+    }
+
+
+def save_config(settings: dict) -> None:
+    """設定をconfファイルに保存する。"""
+    config = configparser.ConfigParser()
+    config["Settings"] = {
+        "output_dir": settings.get("output_dir", "")
+    }
+    config_path = _get_config_path()
+    with open(str(config_path), "w", encoding="utf-8") as f:
+        config.write(f)
+
+
+# ---------------------------------------------------------------------------
+# 出力先サブフォルダ作成
+# ---------------------------------------------------------------------------
+
+def create_output_subdir(base_dir: str) -> str:
+    """
+    指定ベースディレクトリ配下に TxtConvert_{yyyyMMdd_HHmmss} フォルダを作成して返す。
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    subdir = Path(base_dir) / f"TxtConvert_{timestamp}"
+    subdir.mkdir(parents=True, exist_ok=True)
+    return str(subdir)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +209,6 @@ def convert_file(src_path: str, dst_dir: str, log_func) -> bool:
     """1ファイルを変換して出力先に保存する。成功時 True。"""
     src = Path(src_path)
     ext = src.suffix.lower()
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
     try:
         if ext in (".xlsx", ".xlsm"):
@@ -174,8 +232,8 @@ def convert_file(src_path: str, dst_dir: str, log_func) -> bool:
             log_func(f"[スキップ] {src.name}: 非対応の拡張子")
             return False
 
-        # 出力ファイル名: 元のファイル名（拡張子含む）_タイムスタンプ.txt
-        out_path = Path(dst_dir) / f"{src.name}_{timestamp}.txt"
+        # 出力ファイル名: 元のファイル名（拡張子含む）.txt (例: main.py.txt)
+        out_path = Path(dst_dir) / f"{src.name}.txt"
         out_path.write_text(text, encoding="utf-8")
         log_func(f"[完了] {src.name} -> {out_path.name}")
         return True
@@ -206,6 +264,9 @@ class App(TkinterDnD.Tk):
         self.geometry("720x520")
         self.resizable(True, True)
         self._build_ui()
+        # confファイルからデフォルト出力先を読み込む
+        cfg = load_config()
+        self.dst_var.set(cfg.get("output_dir", ""))
 
     # ----- UI構築 -----
     def _build_ui(self):
@@ -216,7 +277,7 @@ class App(TkinterDnD.Tk):
             "ファイルまたはフォルダを指定して.txtファイルに変換します（サブフォルダも対象）\n"
             "excel系のファイルは取消線ありのテキストを<deleted>タグで囲います\n"
             "対応: .xlsx/.xlsm/.xls/.cs/.md/.txt/.sql/.py/.js/.html/.htm/.ts/.tsx/.css/.vue/.json/.xml\n"
-            "出力: 指定フォルダに「元ファイル名_yyyymmddhhmmss.txt」で保存（例: main.py_20260322120000.txt）"
+            "出力: 指定フォルダ\\TxtConvert_yyyyMMdd_HHmmss\\「元ファイル名.txt」で保存（例: main.py.txt）"
         )
         tk.Label(
             self, text=help_text, justify="left",
@@ -336,6 +397,8 @@ class App(TkinterDnD.Tk):
         path = filedialog.askdirectory(title="出力先フォルダを選択")
         if path:
             self.dst_var.set(path)
+            # 選択した出力先をconfファイルに保存する
+            save_config({"output_dir": path})
 
     def _log(self, msg: str):
         """スレッドセーフにログを追加する。"""
@@ -382,13 +445,21 @@ class App(TkinterDnD.Tk):
             messagebox.showwarning("入力エラー", "指定されたファイル/フォルダが見つかりません。")
             return
 
+        # 出力先配下にタイムスタンプサブフォルダを作成する
+        try:
+            actual_dst = create_output_subdir(dst)
+        except Exception as e:
+            messagebox.showerror("エラー", f"出力フォルダの作成に失敗しました。\n{e}")
+            return
+
         # UIロックしてバックグラウンド実行
         self.run_btn.configure(state="disabled")
         self.src_btn_file.configure(state="disabled")
         self.src_btn_folder.configure(state="disabled")
         self._log(f"--- 変換開始 ({len(files)} ファイル) ---")
+        self._log(f"出力先: {actual_dst}")
 
-        thread = threading.Thread(target=self._run_convert, args=(files, dst), daemon=True)
+        thread = threading.Thread(target=self._run_convert, args=(files, actual_dst), daemon=True)
         thread.start()
 
     def _run_convert(self, files: list[str], dst: str):

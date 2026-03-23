@@ -2,6 +2,7 @@
 TxtConverter のユニットテスト
 """
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -47,8 +48,8 @@ class TestConvertTextFile:
         assert len(txt_files) == 1
         assert txt_files[0].read_text(encoding="utf-8") == "print('hello')"
 
-    def test_output_filename_contains_original_name_with_extension(self, tmp_path):
-        """出力ファイル名に元のファイル名（拡張子含む）が含まれる (例: mycode.ts_yyyymmddhhmmss.txt)"""
+    def test_output_filename_is_original_name_plus_txt(self, tmp_path):
+        """出力ファイル名は元のファイル名（拡張子含む）に.txtを付加した形式 (例: mycode.ts.txt)"""
         src = tmp_path / "mycode.ts"
         src.write_text("const x = 1;", encoding="utf-8")
         dst = tmp_path / "output"
@@ -58,7 +59,7 @@ class TestConvertTextFile:
 
         txt_files = list(dst.glob("*.txt"))
         assert len(txt_files) == 1
-        assert txt_files[0].name.startswith("mycode.ts_")
+        assert txt_files[0].name == "mycode.ts.txt"
 
     def test_all_text_extensions_converted(self, tmp_path):
         """テキスト系全拡張子が変換対象になる"""
@@ -124,6 +125,30 @@ class TestConvertTextFile:
 
         txt_files = list(dst.glob("*.txt"))
         assert txt_files[0].read_text(encoding="utf-8") == content
+
+
+# ---------------------------------------------------------------------------
+# タイムスタンプサブフォルダ作成のテスト
+# ---------------------------------------------------------------------------
+
+class TestCreateOutputSubdir:
+    """出力先タイムスタンプサブフォルダ作成のテスト"""
+
+    def test_subdir_is_created(self, tmp_path):
+        """TxtConvert_で始まるサブフォルダが作成される"""
+        subdir = tc.create_output_subdir(str(tmp_path))
+        assert os.path.isdir(subdir)
+
+    def test_subdir_name_format(self, tmp_path):
+        """サブフォルダ名が TxtConvert_yyyyMMdd_HHmmss 形式である"""
+        subdir = tc.create_output_subdir(str(tmp_path))
+        name = os.path.basename(subdir)
+        assert re.match(r"^TxtConvert_\d{8}_\d{6}$", name), f"フォルダ名形式が不正: {name}"
+
+    def test_subdir_is_inside_base_dir(self, tmp_path):
+        """サブフォルダが指定ベースディレクトリの直下に作成される"""
+        subdir = tc.create_output_subdir(str(tmp_path))
+        assert Path(subdir).parent == tmp_path
 
 
 # ---------------------------------------------------------------------------

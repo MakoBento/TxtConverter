@@ -13,3 +13,10 @@ __pycache__/
 
 # Test data
 TEST/
+
+# ユーザー設定（出力先などを記録）
+config.ini
+
+# デフォルト出力先（空フォルダはgit管理外）
+output/*
+!output/.gitkeep
